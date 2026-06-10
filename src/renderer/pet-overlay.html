@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' data:"
+    />
+    <title>桌宠</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+
+      html, body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: transparent !important;
+        user-select: none;
+      }
+
+      body { pointer-events: none; }
+
+      /* ── 主容器 ── */
+      #pet-container {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        pointer-events: none;
+        padding: 4px;
+      }
+
+      /* ── 图片区域 ── */
+      #image-area {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        min-height: 0;
+        pointer-events: none;
+      }
+
+      #pet-image {
+        pointer-events: auto;
+        cursor: grab;
+        max-width: 100%;
+        max-height: 100%;
+        width: auto;
+        height: auto;
+        object-fit: contain;
+        -webkit-user-drag: none;
+        user-drag: none;
+        transition: opacity 0.2s ease;
+      }
+
+      #pet-image:active { cursor: grabbing; }
+      #pet-image.hidden { opacity: 0; }
+
+      #drop-hint {
+        pointer-events: none;
+        color: rgba(255,255,255,0.12);
+        font-size: 13px;
+        font-family: sans-serif;
+        white-space: nowrap;
+      }
+
+      /* ════════════════════════════════
+         GALGAME 风格对话区域
+         ════════════════════════════════ */
+      #chat-area {
+        width: 100%;
+        pointer-events: auto;
+        display: none;
+        flex-direction: column;
+        gap: 3px;
+        padding: 4px;
+        flex-shrink: 0;
+        position: relative;
+      }
+
+      #chat-area.visible { display: flex; }
+
+      /* ── 标题栏：角色名 + 历史按钮 ── */
+      #chat-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 3px 8px;
+        background: rgba(20, 20, 40, 0.85);
+        border-radius: 6px 6px 0 0;
+        border: 1px solid #444466;
+        border-bottom: none;
+      }
+
+      #char-name {
+        font-size: 12px;
+        font-weight: 700;
+        color: #aabbff;
+        letter-spacing: 1px;
+      }
+
+      #history-btn {
+        background: none;
+        border: 1px solid #555577;
+        border-radius: 4px;
+        color: #8888aa;
+        font-size: 13px;
+        cursor: pointer;
+        padding: 2px 6px;
+        pointer-events: auto;
+        transition: all 0.15s;
+      }
+
+      #history-btn:hover { background: rgba(74, 108, 247, 0.3); color: #ffffff; border-color: #6a8aff; }
+      #history-btn.active { background: rgba(74, 108, 247, 0.4); color: #ffffff; border-color: #6a8aff; }
+
+      /* ── Galgame 对话框（显示最新一条消息） ── */
+      #galgame-box {
+        background: rgba(10, 10, 30, 0.88);
+        border: 1px solid #444466;
+        border-top: none;
+        border-radius: 0 0 6px 6px;
+        padding: 8px 10px;
+        min-height: 52px;
+        max-height: 80px;
+        overflow-y: auto;
+        scrollbar-width: none;
+        position: relative;
+      }
+
+      #galgame-box::-webkit-scrollbar { display: none; }
+
+      #latest-msg {
+        font-size: 13px;
+        line-height: 1.5;
+        color: #e0e0f0;
+        word-break: break-word;
+        white-space: pre-wrap;
+      }
+
+      #latest-msg .label-user {
+        color: #88aaff;
+        font-weight: 600;
+        margin-right: 4px;
+      }
+      #latest-msg .label-ai {
+        color: #ff88aa;
+        font-weight: 600;
+        margin-right: 4px;
+      }
+
+      /* ── 思考中 ··· 动画 ── */
+      #thinking {
+        display: none;
+        position: absolute;
+        bottom: 8px;
+        right: 12px;
+        font-size: 20px;
+        color: #aabbff;
+        letter-spacing: 3px;
+      }
+      #thinking.visible { display: block; }
+
+      #thinking span {
+        opacity: 0;
+        animation: thinkBlink 1.4s infinite;
+      }
+      #thinking span:nth-child(1) { animation-delay: 0s; }
+      #thinking span:nth-child(2) { animation-delay: 0.3s; }
+      #thinking span:nth-child(3) { animation-delay: 0.6s; }
+
+      @keyframes thinkBlink {
+        0%   { opacity: 0; }
+        40%  { opacity: 1; }
+        80%  { opacity: 0; }
+        100% { opacity: 0; }
+      }
+
+      /* ── 输入行 ── */
+      #chat-input-row {
+        display: flex;
+        gap: 3px;
+        align-items: center;
+        pointer-events: auto;
+        margin-top: 2px;
+      }
+
+      #chat-input {
+        flex: 1;
+        padding: 6px 8px;
+        border: 1px solid #555577;
+        border-radius: 6px;
+        font-size: 12px;
+        font-family: sans-serif;
+        background: rgba(14, 14, 26, 0.9);
+        color: #ffffff;
+        outline: none;
+        pointer-events: auto;
+        transition: border-color 0.15s;
+        min-width: 0;
+      }
+
+      #chat-input::placeholder { color: #555566; }
+      #chat-input:focus { border-color: #6a8aff; }
+
+      #chat-send {
+        width: 32px;
+        height: 26px;
+        border: none;
+        border-radius: 6px;
+        background: #4a6cf7;
+        color: #ffffff;
+        font-size: 14px;
+        font-weight: 700;
+        cursor: pointer;
+        pointer-events: auto;
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: background 0.15s;
+      }
+
+      #chat-send:hover { background: #6a8aff; }
+      #chat-send:disabled { opacity: 0.35; cursor: not-allowed; }
+
+      /* ════════════════════════════════
+         历史面板（覆盖在对话框上方）
+         ════════════════════════════════ */
+      #history-overlay {
+        display: none;
+        position: absolute;
+        inset: 0;
+        background: rgba(8, 8, 24, 0.95);
+        border-radius: 6px;
+        z-index: 10;
+        flex-direction: column;
+        pointer-events: auto;
+      }
+
+      #history-overlay.visible { display: flex; }
+
+      #history-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 6px 10px;
+        border-bottom: 1px solid #333355;
+      }
+
+      #history-header span {
+        font-size: 12px;
+        font-weight: 700;
+        color: #aabbff;
+      }
+
+      #history-close {
+        background: none;
+        border: none;
+        color: #8888aa;
+        font-size: 16px;
+        cursor: pointer;
+        padding: 0 4px;
+        pointer-events: auto;
+      }
+
+      #history-close:hover { color: #ffffff; }
+
+      #history-list {
+        flex: 1;
+        overflow-y: auto;
+        padding: 8px 10px;
+        scrollbar-width: none;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      #history-list::-webkit-scrollbar { display: none; }
+
+      .hist-item {
+        font-size: 12px;
+        line-height: 1.4;
+        padding: 4px 8px;
+        border-radius: 4px;
+        word-break: break-word;
+      }
+
+      .hist-item.user {
+        background: rgba(68, 68, 68, 0.4);
+        color: #aaaacc;
+        align-self: flex-end;
+      }
+
+      .hist-item.assistant {
+        background: rgba(45, 77, 207, 0.25);
+        color: #d0d8ff;
+        align-self: flex-start;
+      }
+
+      .hist-item .hist-label {
+        font-size: 10px;
+        font-weight: 700;
+        display: block;
+        margin-bottom: 1px;
+        opacity: 0.7;
+      }
+
+      .hist-item.user .hist-label { color: #88aaff; }
+      .hist-item.assistant .hist-label { color: #ff88aa; }
+
+      /* ════════════════════════════════
+         缩放手柄 & 尺寸标签
+         ════════════════════════════════ */
+      #resize-handle {
+        position: fixed;
+        right: 0;
+        bottom: 0;
+        width: 28px;
+        height: 28px;
+        pointer-events: auto;
+        cursor: nwse-resize;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        opacity: 0;
+        transition: opacity 0.2s;
+        z-index: 999;
+      }
+
+      #resize-handle.visible { opacity: 1; }
+
+      .handle-bg {
+        width: 20px;
+        height: 20px;
+        background: #4a6cf7;
+        border: 2px solid rgba(255,255,255,0.9);
+        border-radius: 4px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        position: relative;
+        transition: transform 0.1s;
+      }
+
+      .handle-bg::after {
+        content: '';
+        position: absolute;
+        bottom: 3px;
+        right: 3px;
+        width: 8px;
+        height: 8px;
+        border-right: 2px solid rgba(255,255,255,0.8);
+        border-bottom: 2px solid rgba(255,255,255,0.8);
+      }
+
+      #resize-handle:hover .handle-bg { transform: scale(1.2); }
+
+      #size-label {
+        position: fixed;
+        right: 34px;
+        bottom: 6px;
+        pointer-events: none;
+        font-size: 11px;
+        font-family: sans-serif;
+        color: rgba(255,255,255,0.5);
+        opacity: 0;
+        transition: opacity 0.2s;
+      }
+
+      #size-label.visible { opacity: 1; }
+    </style>
+  </head>
+  <body>
+    <div id="pet-container">
+      <!-- 图片区域 -->
+      <div id="image-area">
+        <img id="pet-image" class="hidden" alt="桌宠" draggable="false" />
+        <span id="drop-hint">从左侧选择模型</span>
+      </div>
+
+      <!-- 对话区域（galgame 风格） -->
+      <div id="chat-area">
+        <!-- 标题栏 -->
+        <div id="chat-header">
+          <span id="char-name">夜乃樱</span>
+          <button id="history-btn">📋</button>
+        </div>
+
+        <!-- 对话框：只显示最新一条消息 -->
+        <div id="galgame-box">
+          <div id="latest-msg">（开始对话吧）</div>
+          <div id="thinking">
+            <span>·</span><span>·</span><span>·</span>
+          </div>
+        </div>
+
+        <!-- 历史面板（默认隐藏） -->
+        <div id="history-overlay">
+          <div id="history-header">
+            <span>📋 对话历史</span>
+            <button id="history-close">✕</button>
+          </div>
+          <div id="history-list"></div>
+        </div>
+
+        <!-- 输入行 -->
+        <div id="chat-input-row">
+          <input id="chat-input" type="text" placeholder="输入消息…" autocomplete="off" />
+          <button id="chat-send">↵</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 缩放手柄 & 标签 -->
+    <div id="resize-handle">
+      <div class="handle-bg"></div>
+    </div>
+    <div id="size-label">100%</div>
+
+    <script type="module" src="./src/pet-main.ts"></script>
+  </body>
+</html>
