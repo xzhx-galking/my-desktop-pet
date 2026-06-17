@@ -19,33 +19,28 @@
 
 ## 📥 安装
 
-### 方式一：下载安装包（推荐）
+### 方式一：从源码运行（推荐）
 
-从 Releases 下载 `my-desktop-pet-1.0.0-setup.exe`，双击安装即可。
+项目根目录提供了三个脚本，双击即可运行：
 
-> 安装包约 **335 MB**，包含 Electron 运行时 + 全部立绘 + 参考音频。  
-> GPT-SoVITS 语音引擎（约 18 GB）需单独下载，安装后在「设置 → 语音模块」中配置路径。
-
-### 方式二：从源码运行
+| 脚本 | 功能 |
+|------|------|
+| `setup.bat` | 一键安装 — 检查环境 → 安装依赖 → 配置 API 密钥 |
+| `run_dev.bat` | 启动桌宠 — 以开发模式运行，支持热重载 |
+| `build_installer.bat` | 打包安装程序 — 生成 `.exe` 安装包 |
 
 ```bash
-# 1. 克隆仓库
+# 或者手动操作：
 git clone https://github.com/xzhx-galking/my-desktop-pet.git
 cd my-desktop-pet
-
-# 2. 安装依赖
 npm install
-
-# 3. 配置 API 密钥
-cp .env.example .env
-# 编辑 .env，填入你的 DeepSeek API Key：
-# DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-
-# 4. 启动开发模式
-npm run dev
+cp .env.example .env    # 编辑填入你的 DeepSeek API Key
+npm run dev             # 启动桌宠
+npm run build:win       # 打包安装程序
 ```
 
 > 💡 首次启动需加载语音模型，约 30 秒~2 分钟，请耐心等待。
+> GPT-SoVITS 语音引擎（约 18 GB）需单独下载，在「设置 → 语音模块」中配置路径。
 
 ---
 
