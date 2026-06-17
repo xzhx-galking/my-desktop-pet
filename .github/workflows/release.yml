@@ -1,0 +1,84 @@
+# =========================================================
+#   release.yml — 夜乃樱桌宠 自动打包发布工作流
+# =========================================================
+#
+#   🌟 作用：
+#   当你推送一个版本标签（如 v1.0.0）到 GitHub 时，
+#   此工作流会自动在云端执行打包，并将生成的安装包
+#   上传到 GitHub Releases 页面供用户下载。
+#
+#   📦 产物：
+#   - my-desktop-pet-1.0.0-setup.exe  (Windows 安装包)
+#
+#   🚀 使用方法：
+#   1. 修改 package.json 中的 version 字段
+#   2. 推送带 v 前缀的标签：
+#      git tag v1.0.0
+#      git push origin v1.0.0
+#   3. 等待 GitHub Actions 自动构建（约 5~10 分钟）
+#   4. 打开 GitHub → Releases → 下载安装包
+#
+#   💡 原理：
+#   网页上传单文件限制 25 MB，但 GitHub Actions 上传到
+#   Release 没有大小限制（最大 2 GB）。
+#   Sakura 等项目都是用这种方式分发安装包。
+#
+#   ⚠️ 注意事项：
+#   - 需要将立绘和音频资源提交到仓库（已完成）
+#   - .env 文件不会被提交，构建不依赖 API Key
+#   - GPT-SoVITS（18GB）不包含在安装包内
+# =========================================================
+
+name: 自动打包
+
+# ── 触发条件 ──
+# 当推送以 v 开头的标签时触发，如 v1.0.0、v2.1.0
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    # 在 Windows 环境运行（打包 Windows 安装包）
+    runs-on: windows-latest
+
+    steps:
+      # ── Step 1: 拉取代码 ──
+      # 将仓库代码下载到云端虚拟机
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      # ── Step 2: 安装 Node.js ──
+      # 设置 Node.js 运行时环境
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      # ── Step 3: 安装依赖 ──
+      # 执行 npm install 安装项目所需的所有依赖包
+      - name: 安装依赖
+        run: npm install
+
+      # ── Step 4: 打包安装程序 ──
+      # 执行 npm run build:win，生成 .exe 安装包
+      # electron-builder 会将产物输出到 dist/ 目录
+      - name: 打包安装程序
+        run: npm run build:win
+
+      # ── Step 5: 上传到 Release ──
+      # 将生成的安装包附加到 GitHub Release 中
+      # 用户可以直接从 Releases 页面下载
+      - name: 上传到 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          # 上传的文件（使用通配符匹配任意版本号）
+          files: |
+            dist/*-setup.exe
+          # Release 说明（可选，会自动使用 tag 对应的描述）
+          generate_release_notes: true
+        env:
+          # GitHub Token 由 Actions 自动提供，无需手动配置
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
