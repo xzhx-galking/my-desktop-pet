@@ -337,6 +337,17 @@ app.whenReady().then(() => {
     const st = getVoiceStatus()
     if (st.running) return { success: true, message: '服务已在运行', pid: st.pid }
 
+    // 检查 GPT-SoVITS 是否已安装
+    const voiceDir = getVoiceDir()
+    if (!existsSync(voiceDir) || !existsSync(join(voiceDir, 'runtime', 'python.exe'))) {
+      return {
+        success: false,
+        message: '未找到 GPT-SoVITS。请将 GPT-SoVITS v2ProPlus 放置在 resources/gpt-sovits/ 目录下，'
+               + '或在「语音模块」页面右上角点击选择目录。'
+               + '\n\n需要 GPT-SoVITS？请下载后解压到 resources/gpt-sovits/'
+      }
+    }
+
     // 写入自定义配置文件（使用用户选择的模型路径）
     try {
       const gptPath = modelPaths?.gpt || 'GPT_weights_v2ProPlus/夜乃樱音频-e15.ckpt'

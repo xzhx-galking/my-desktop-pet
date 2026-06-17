@@ -85,7 +85,7 @@ const runningIndex = ref(-1)  // -1 表示无正在运行的任务
 
 /** 默认服务列表，关联打包目录下的脚本 */
 function defaultServices(): ServiceEntry[] {
-  const dir = 'E:\\打包目录'
+  const dir = 'E:\\打包目录\\第一次启动必点'
   return [
     {
       name: '📦 安装环境',
