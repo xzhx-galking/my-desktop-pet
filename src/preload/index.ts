@@ -28,6 +28,8 @@ const api = {
     ipcRenderer.send('pet:lockSize', width, height),
   setPetClickThrough: (clickThrough: boolean): void =>
     ipcRenderer.send('pet:setClickThrough', clickThrough),
+  setPetEmotion: (emotion: string): void =>
+    ipcRenderer.send('pet:setEmotionByName', emotion),
   requestPetModel: (): Promise<string> =>
     ipcRenderer.invoke('pet:requestModel'),
   onPetShowModel: (callback: (dataUrl: string) => void): void => {
@@ -44,6 +46,8 @@ const api = {
   },
 
   // ── 语音模块 (GPT-SoVITS TTS) ──
+  getDefaultPromptText: (): Promise<string> =>
+    ipcRenderer.invoke('get:defaultPromptText'),
   voiceStatus: (): Promise<{ running: boolean; pid: number | null }> =>
     ipcRenderer.invoke('voice:status'),
   voiceStart: (modelPaths?: { gpt?: string; sovits?: string }): Promise<{ success: boolean; message: string; pid?: number | null }> =>
@@ -65,12 +69,38 @@ const api = {
   }): Promise<{ success: boolean; message: string; dataUrl: string }> =>
     ipcRenderer.invoke('voice:tts', params),
 
+  // ── 服务/脚本 ──
+  runCommand: (command: string): Promise<{ success: boolean; message: string }> =>
+    ipcRenderer.invoke('service:run', command),
+
+  // ── API 配置管理（URL + Key） ──
+  getApiConfig: (): Promise<{ configured: boolean; masked: string; url: string }> =>
+    ipcRenderer.invoke('get:apiConfig'),
+  setApiConfig: (cfg: { url: string; key: string }): Promise<{ success: boolean; message: string }> =>
+    ipcRenderer.invoke('set:apiConfig', cfg),
+
   // ── AI 对话 (DeepSeek) ──
   chatSend: (params: {
     message: string
     history?: { role: 'user' | 'assistant'; content: string }[]
-  }): Promise<{ success: boolean; message: string; reply: string; tts_text?: string; emotion?: string }> =>
-    ipcRenderer.invoke('chat:send', params)
+  }): Promise<{ success: boolean; message: string; reply: string; tts_text?: string; emotion?: string; segments?: { emotion: string; text: string }[] }> =>
+    ipcRenderer.invoke('chat:send', params),
+
+  // ── 截屏监控 ──
+  screenshotStart: (intervalMs?: number): Promise<{ success: boolean; message: string }> =>
+    ipcRenderer.invoke('screenshot:start', intervalMs),
+  screenshotStop: (): Promise<{ success: boolean; message: string }> =>
+    ipcRenderer.invoke('screenshot:stop'),
+  screenshotStatus: (): Promise<{ running: boolean }> =>
+    ipcRenderer.invoke('screenshot:status'),
+  screenshotCaptureOnce: (): Promise<{ success: boolean; message: string }> =>
+    ipcRenderer.invoke('screenshot:captureOnce'),
+  onScreenshotReaction: (callback: (data: { emotion: string; text: string }) => void): void => {
+    ipcRenderer.on('pet:screenshotReaction', (_event, data) => callback(data))
+  },
+  offScreenshotReaction: (): void => {
+    ipcRenderer.removeAllListeners('pet:screenshotReaction')
+  }
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

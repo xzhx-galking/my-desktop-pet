@@ -6,51 +6,51 @@
 
 import { useRouter } from 'vue-router'
 import { petStore } from '../stores/petStore'
-import { loadModelPath, loadModelName } from '../stores/persist'
 
 const router = useRouter()
 
-// 页面加载时从 localStorage 恢复模型信息
-const savedPath = loadModelPath()
-const savedName = loadModelName()
-if (savedPath && !petStore.currentModelPath) {
-  petStore.currentModelPath = savedPath
-  petStore.currentModelName = savedName
-}
-
-/** 启动桌宠——使用上一次确认的模型 */
+/** 启动桌宠——首次启动时同步加载语音模块 */
 async function startPet(): Promise<void> {
-  let dataUrl = petStore.currentModelDataUrl
-  const filePath = petStore.currentModelPath
+  // 检查语音服务是否已在运行
+  const voiceStatus = await window.api.voiceStatus()
+  const needVoiceLoad = !voiceStatus.running
 
-  // 有路径但没 dataUrl（跨会话重启后）→ 重新读取
-  if (!dataUrl && filePath) {
-    dataUrl = await window.api.readAsDataUrl(filePath)
-    if (dataUrl) petStore.currentModelDataUrl = dataUrl
+  if (needVoiceLoad) {
+    petStore.isVoiceLoading = true
   }
 
-  if (!dataUrl) {
-    router.push('/model')
-    return
-  }
-  await window.api.showPet(filePath, dataUrl)
-  petStore.isActive = true
+  try {
+    // 打开宠物窗（传空路径则由 main process 自动加载默认立绘 A10.png）
+    await window.api.showPet('', '')
 
-  // 同时启动语音 API 服务（不阻塞，后台自动）
-  window.api.voiceStart().then((res) => {
-    console.log('[home] 语音服务:', res.message)
-  })
+    // 首次启动才需要等待语音模型加载
+    if (needVoiceLoad) {
+      const voiceRes = await window.api.voiceStart()
+      console.log('[home] 语音服务:', voiceRes.message)
+    }
+  } catch (err) {
+    console.error('[home] 启动失败:', err)
+  } finally {
+    petStore.isVoiceLoading = false
+    petStore.isActive = true
+  }
 }
 
-/** 关闭桌宠 */
+/** 关闭桌宠（不停止语音服务，下次秒开） */
 async function stopPet(): Promise<void> {
   await window.api.hidePet()
   petStore.isActive = false
 }
+
+// 页面加载时查询截屏状态（更新 store，供其他组件参考）
+window.api.screenshotStatus().then(st => {
+  petStore.screenshotEnabled = st.running
+})
 </script>
 
 <template>
   <div class="home-page">
+    <button class="settings-btn" title="设置" @click="router.push('/settings')">⚙️</button>
     <div class="hero">
       <div class="logo-area">
         <span class="logo-emoji">🐾</span>
@@ -64,26 +64,21 @@ async function stopPet(): Promise<void> {
           <span class="status-text">{{ petStore.isActive ? '运行中' : '已停止' }}</span>
         </div>
 
-        <div v-if="petStore.currentModelName" class="current-model">
-          <span class="model-label">当前立绘：</span>
-          <span class="model-name">{{ petStore.currentModelName }}</span>
-        </div>
-        <div v-else class="current-model">
-          <span class="model-label hint">请先在「更换立绘」中选择并确认</span>
-        </div>
-
         <button
           class="power-btn"
-          :class="{ on: petStore.isActive, off: !petStore.isActive }"
+          :class="{ on: petStore.isActive, loading: petStore.isVoiceLoading, off: !petStore.isActive && !petStore.isVoiceLoading }"
+          :disabled="petStore.isVoiceLoading"
           @click="petStore.isActive ? stopPet() : startPet()"
         >
-          <span class="btn-icon">{{ petStore.isActive ? '⏻' : '⏻' }}</span>
-          <span class="btn-label">{{ petStore.isActive ? '关闭桌宠' : '启动桌宠' }}</span>
+          <span class="btn-icon">{{ petStore.isVoiceLoading ? '⏳' : '⏻' }}</span>
+          <span class="btn-label">
+            {{ petStore.isVoiceLoading ? '加载语音模块中' : petStore.isActive ? '关闭桌宠' : '启动桌宠' }}
+          </span>
         </button>
+
       </div>
 
       <div class="tips">
-        <p class="tip-line">💡 在左侧「更换立绘」中选择立绘并确认</p>
         <p class="tip-line">💡 可拖拽宠物移动、拖拽右下角手柄缩放</p>
         <p class="tip-line">💡 点击其他软件窗口时手柄自动隐藏</p>
       </div>
@@ -99,6 +94,30 @@ async function stopPet(): Promise<void> {
   height: 100%;
   width: 100%;
   padding: 40px;
+  position: relative;
+}
+
+/* ── 设置齿轮按钮 ── */
+.settings-btn {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--ev-c-gray-3);
+  border-radius: 8px;
+  background: transparent;
+  font-size: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+  z-index: 10;
+}
+.settings-btn:hover {
+  background-color: var(--ev-c-gray-3);
+  transform: scale(1.1);
 }
 
 .hero {
@@ -184,22 +203,6 @@ async function stopPet(): Promise<void> {
   color: var(--ev-c-text-1);
 }
 
-/* ── 当前模型 ── */
-.current-model {
-  font-size: 13px;
-  color: var(--ev-c-text-2);
-}
-
-.model-label.hint {
-  color: var(--ev-c-text-3);
-  font-style: italic;
-}
-
-.model-name {
-  color: var(--ev-c-text-1);
-  font-weight: 500;
-}
-
 /* ── 电源按钮 ── */
 .power-btn {
   display: flex;
@@ -225,6 +228,16 @@ async function stopPet(): Promise<void> {
 
 .power-btn.on:hover {
   background-color: #dc2626;
+}
+
+.power-btn.loading {
+  color: #fff;
+  background-color: #f59e0b;
+  cursor: wait;
+}
+
+.power-btn.loading:hover {
+  background-color: #d97706;
 }
 
 .power-btn.off {

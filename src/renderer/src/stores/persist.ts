@@ -11,7 +11,8 @@ const KEYS = {
   VOICE_FOLDER: 'pet_voice_folder',
   VOICE_PARAMS: 'pet_voice_params',
   GPT_MODEL: 'pet_gpt_model_path',
-  SOVITS_MODEL: 'pet_sovits_model_path'
+  SOVITS_MODEL: 'pet_sovits_model_path',
+  SCREENSHOT_INTERVAL: 'pet_screenshot_interval'
 }
 
 export interface VoiceParams {
@@ -22,6 +23,7 @@ export interface VoiceParams {
   speed_factor: number
   repetition_penalty: number
   sample_steps: number
+  volume: number
 }
 
 export function saveVoiceParams(params: VoiceParams): void {
@@ -42,11 +44,14 @@ export function loadVoiceParams(): VoiceParams {
           temperature: 0.7,
           speed_factor: 1.0,
           repetition_penalty: 1.25,
-          sample_steps: 16
+          sample_steps: 16,
+          volume: p.volume ?? 1.0
         }
         localStorage.setItem(KEYS.VOICE_PARAMS, JSON.stringify(migrated))
         return migrated
       }
+      // 兼容旧数据：缺少 volume 字段时补充
+      if (p.volume === undefined) { p.volume = 1.0; saveVoiceParams(p) }
       return p
     }
   } catch {}
@@ -58,7 +63,8 @@ export function loadVoiceParams(): VoiceParams {
     temperature: 0.7,
     speed_factor: 1.0,
     repetition_penalty: 1.25,
-    sample_steps: 16
+    sample_steps: 16,
+    volume: 1.0
   }
 }
 
@@ -98,6 +104,21 @@ export function saveVoiceFolder(path: string): void {
 }
 export function loadVoiceFolder(): string {
   try { return localStorage.getItem(KEYS.VOICE_FOLDER) || '' } catch { return '' }
+}
+
+export function saveScreenshotInterval(sec: number): void {
+  try { localStorage.setItem(KEYS.SCREENSHOT_INTERVAL, String(sec)) } catch {}
+}
+
+export function loadScreenshotInterval(): number {
+  try {
+    const raw = localStorage.getItem(KEYS.SCREENSHOT_INTERVAL)
+    if (raw) {
+      const n = parseInt(raw, 10)
+      if (!isNaN(n) && n >= 5 && n <= 3600) return n
+    }
+  } catch {}
+  return 60 // 默认 60 秒
 }
 
 export function clearAll(): void {

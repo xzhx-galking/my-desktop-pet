@@ -10,19 +10,9 @@ const routes: RouteRecordRaw[] = [
     component: () => import('../views/HomePage.vue')
   },
   {
-    path: '/model',
-    name: 'model',
-    component: () => import('../views/ModelPanel.vue')
-  },
-  {
-    path: '/voice',
-    name: 'voice',
-    component: () => import('../views/VoicePanel.vue')
-  },
-  {
-    path: '/expression',
-    name: 'expression',
-    component: () => import('../views/ExpressionPanel.vue')
+    path: '/settings',
+    name: 'settings',
+    component: () => import('../views/SettingsPage.vue')
   }
 ]
 

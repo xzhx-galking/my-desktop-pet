@@ -11,6 +11,13 @@ files:
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
 asarUnpack:
   - resources/**
+extraResources:
+  - from: resources/poses
+    to: poses
+  - from: resources/audio
+    to: audio
+  - from: resources/gpt-sovits
+    to: gpt-sovits
 win:
   executableName: my-desktop-pet
 nsis:

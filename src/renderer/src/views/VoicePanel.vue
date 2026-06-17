@@ -100,13 +100,13 @@ watch(files, () => {
 const gptModelPath = ref(localStorage.getItem(GPT_KEY) || '')
 const sovitsModelPath = ref(localStorage.getItem(SOVITS_KEY) || '')
 
-const GPT_BASE = 'E:\\GPT-SoVITS-v2pro-20250604'
+const GPT_BASE = ''
 
 /** 选择 GPT 模型文件（.ckpt） */
 async function pickGptModel(): Promise<void> {
   const path = await window.api.selectFile({
     filters: [{ name: 'GPT 模型 (*.ckpt)', extensions: ['ckpt'] }],
-    defaultPath: GPT_BASE + '\\GPT_weights_v2ProPlus'
+    defaultPath: GPT_BASE || undefined
   })
   if (path) {
     gptModelPath.value = path
@@ -118,7 +118,7 @@ async function pickGptModel(): Promise<void> {
 async function pickSovitsModel(): Promise<void> {
   const path = await window.api.selectFile({
     filters: [{ name: 'SoVITS 模型 (*.pth)', extensions: ['pth'] }],
-    defaultPath: GPT_BASE + '\\SoVITS_weights_v2ProPlus'
+    defaultPath: GPT_BASE || undefined
   })
   if (path) {
     sovitsModelPath.value = path
@@ -126,11 +126,9 @@ async function pickSovitsModel(): Promise<void> {
   }
 }
 
-/** 获取模型文件相对于 GPT-SoVITS 目录的路径 */
+/** 获取模型文件的相对路径（用于写入配置文件） */
 function getRelativePath(absPath: string): string {
-  const base = 'E:\\GPT-SoVITS-v2pro-20250604\\'
-  if (absPath.startsWith(base)) return absPath.slice(base.length).replace(/\\/g, '/')
-  return absPath
+  return absPath.replace(/\\/g, '/')
 }
 
 // ── 语音参数（可调节，自动持久化） ──
@@ -225,16 +223,20 @@ watch(promptLang, (v) => {
 })
 
 onMounted(() => {
-  // 恢复之前保存的提示文字
+  // 恢复之前保存的提示文字，没有则从 bundled ref.txt 读取默认值
   const savedText = localStorage.getItem('pet_ref_prompt_text')
-  if (savedText) promptText.value = savedText
+  if (savedText) {
+    promptText.value = savedText
+  } else {
+    // 没有保存过 → 从 resources/audio/ref.txt 读取
+    window.api.getDefaultPromptText().then(t => { if (t) promptText.value = t })
+  }
   const savedLang = localStorage.getItem('pet_ref_prompt_lang')
   if (savedLang) promptLang.value = savedLang
 
-  // 如果没有保存过参考音频路径，设置默认值
+  // 如果没有保存过参考音频路径，留空由 main process 使用 bundled ref.mp3
   if (!localStorage.getItem('pet_ref_audio_path')) {
-    localStorage.setItem('pet_ref_audio_path',
-      'E:\\桌宠文件\\声音-切分后的mp3\\VO01_0678.OGG_0000000000_0000134720.mp3')
+    localStorage.setItem('pet_ref_audio_path', '')
   }
 
   // 延迟恢复选中的音频（等待文件列表加载完毕）
@@ -437,6 +439,13 @@ onUnmounted(() => {
         <p class="section-desc">调节 TTS 合成参数，修改后即时生效</p>
 
         <div class="param-grid">
+          <div class="param-item">
+            <label class="param-label">
+              <span>🔊 音量 volume</span>
+              <span class="param-val">{{ Math.round(voiceParams.volume * 100) }}%</span>
+            </label>
+            <input type="range" min="0" max="1.0" step="0.05" v-model.number="voiceParams.volume" class="param-slider" />
+          </div>
           <div class="param-item">
             <label class="param-label">
               <span>温度 temperature</span>

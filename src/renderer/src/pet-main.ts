@@ -23,6 +23,9 @@ const historyOverlay = document.getElementById('history-overlay') as HTMLElement
 const historyList = document.getElementById('history-list') as HTMLElement
 const historyBtn = document.getElementById('history-btn') as HTMLButtonElement
 const historyClose = document.getElementById('history-close') as HTMLButtonElement
+const continueArrow = document.getElementById('continue-arrow') as HTMLElement
+const screenshotBtn = document.getElementById('screenshot-btn') as HTMLButtonElement
+const voiceLoading = document.getElementById('voice-loading') as HTMLElement
 
 // ── 窗口尺寸（本地跟踪） ──
 const DEFAULT_W = 240
@@ -81,14 +84,71 @@ let chatHistory: ChatMsg[] = []
 let isSending = false
 let historyVisible = false
 
-/** 更新 galgame 对话框（仅显示最新一条消息） */
-function updateGalgameBox(role: ChatRole, content: string): void {
+// ── 分段落语音状态 ──
+let segmentAudioUrls: (string | null)[] = []
+let currentAudio: HTMLAudioElement | null = null
+
+// ── 多段推进状态 ──
+let segments: { emotion: string; text: string }[] = []
+let segIndex = 0
+
+/** 显示对话框中的一段文本，并切换到对应表情 */
+function showSegment(index: number, role: ChatRole): void {
+  if (index < 0 || index >= segments.length) return
+  const seg = segments[index]
   const label = role === 'assistant' ? '夜乃樱' : '你'
   const labelClass = role === 'assistant' ? 'label-ai' : 'label-user'
-  latestMsg.innerHTML = `<span class="${labelClass}">${label}</span> ${content}`
+  latestMsg.innerHTML = `<span class="${labelClass}">${label}</span> ${seg.text}`
   galgameBox.scrollTop = galgameBox.scrollHeight
-  // 如果有历史面板打开，同步更新
-  if (historyVisible) updateHistoryList()
+  // 切换表情（通知主进程按标签选图）
+  if (role === 'assistant') window.api.setPetEmotion(seg.emotion)
+  // 更新继续箭头
+  continueArrow.classList.toggle('visible', index < segments.length - 1)
+}
+
+/** 点击 galgame 框推进到下一段 */
+function advanceSegment(): void {
+  // 截屏反应模式下，点一下恢复对话分段
+  if (screenShotMode) {
+    screenShotMode = false
+    restoreSegments()
+    return
+  }
+  if (segments.length === 0) return
+  if (segIndex < segments.length - 1) {
+    segIndex++
+    const url = segmentAudioUrls[segIndex]
+    if (url) {
+      // 语音已就绪 → 立即显示文字并播放
+      revealCurrentSegment()
+    } else {
+      // 语音未就绪 → 先显示加载波动，就绪后自动揭示
+      setVoiceLoading(true)
+      latestMsg.innerHTML = ''
+      continueArrow.classList.remove('visible')
+    }
+  }
+}
+
+// ── 截屏反应 vs 对话分段互不干扰 ──
+let screenShotMode = false
+let savedSegments: { emotion: string; text: string }[] = []
+let savedSegIndex = 0
+
+/** 保存当前对话分段（截屏前调用） */
+function saveSegments(): void {
+  savedSegments = segments.slice()
+  savedSegIndex = segIndex
+}
+
+/** 恢复对话分段（截屏结束后调用） */
+function restoreSegments(): void {
+  if (savedSegments.length > 0) {
+    segments = savedSegments
+    segIndex = savedSegIndex
+    savedSegments = []
+    showSegment(segIndex, 'assistant')
+  }
 }
 
 /** 更新历史面板内容 */
@@ -113,6 +173,18 @@ function setThinking(show: boolean): void {
   thinkingEl.classList.toggle('visible', show)
 }
 
+/** 显示/隐藏语音加载波动 */
+function setVoiceLoading(show: boolean): void {
+  voiceLoading.classList.toggle('visible', show)
+}
+
+/** 语音就绪后显示当前段文字并播放（隐藏加载波动） */
+function revealCurrentSegment(): void {
+  setVoiceLoading(false)
+  showSegment(segIndex, 'assistant')
+  playCurrentSegmentAudio()
+}
+
 /** 发送消息 */
 async function sendChat(): Promise<void> {
   const text = chatInput.value.trim()
@@ -121,9 +193,14 @@ async function sendChat(): Promise<void> {
   chatInput.value = ''
   isSending = true
   chatSend.disabled = true
+  screenShotMode = false
+  savedSegments = []
+  segments = []
+  segIndex = 0
 
   // galgame 风格：显示用户消息在对话框中
-  updateGalgameBox('user', text)
+  const userLabel = '你'
+  latestMsg.innerHTML = `<span class="label-user">${userLabel}</span> ${text}`
   chatHistory.push({ role: 'user', content: text } as ChatMsg)
 
   try {
@@ -133,36 +210,31 @@ async function sendChat(): Promise<void> {
     })
 
     if (res.success && res.reply) {
-      // 先存历史，但不显示文字
+      // 存历史
       chatHistory.push({ role: 'assistant', content: res.reply } as ChatMsg)
+      if (chatHistory.length > 20) chatHistory = chatHistory.slice(-20)
 
-      // 如果历史超过 20 条，压缩早期的
-      if (chatHistory.length > 20) {
-        chatHistory = chatHistory.slice(-20)
-      }
+      // 保存分段
+      segments = (res.segments && res.segments.length > 0)
+        ? res.segments
+        : [{ emotion: res.emotion || '日常', text: res.reply }]
+      segIndex = 0
+      segmentAudioUrls = []
+      if (currentAudio) { currentAudio.pause(); currentAudio = null }
 
-      // 先显示 ··· 思考动画（不显示文字）
-      setThinking(true)
-      let textShown = false
-      try {
-        await speakReply(res.tts_text || res.reply, () => {
-          // 第一段语音生成完毕 → 同时显示文字 + 播放语音
-          setThinking(false)
-          updateGalgameBox('assistant', res.reply)
-          textShown = true
-        })
-      } finally {
-        if (!textShown) {
-          // TTS 失败/跳过 → 仍然显示文字
-          setThinking(false)
-          updateGalgameBox('assistant', res.reply)
-        }
-      }
+      // 先显示语音加载波动，语音就绪后才显示文字
+      setThinking(false)
+      setVoiceLoading(true)
+      latestMsg.innerHTML = ''
+      continueArrow.classList.remove('visible')
+
+      // 后台逐段预合成语音
+      preGenerateSegmentAudio().catch(() => {})
     } else {
-      updateGalgameBox('assistant', `[${res.message}]`)
+      latestMsg.innerHTML = `<span class="label-ai">夜乃樱</span> [${res.message}]`
     }
   } catch (err) {
-    updateGalgameBox('assistant', `[请求异常]`)
+    latestMsg.innerHTML = `<span class="label-ai">夜乃樱</span> [请求异常]`
     console.error('[pet-chat] 发送失败:', err)
   } finally {
     isSending = false
@@ -171,7 +243,11 @@ async function sendChat(): Promise<void> {
   }
 }
 
-const DEFAULT_REF_AUDIO = 'E:\\桌宠文件\\声音-切分后的mp3\\VO01_0678.OGG_0000000000_0000134720.mp3'
+// ── galgame 框点击推进 ──
+galgameBox.addEventListener('click', advanceSegment)
+
+/** 默认参考音频路径（在 main process voice:tts 中自动填充资源路径，传空由后端决定） */
+const DEFAULT_REF_AUDIO = ''
 
 /** 去掉括号内的内容（内心想法）及括号后的多余标点，只留外部文字用于 TTS */
 function stripInnerThoughts(text: string): string {
@@ -181,160 +257,80 @@ function stripInnerThoughts(text: string): string {
     .trim()
 }
 
-/**
- * 将长文本按句尾标点拆分成短段，每段不超过 maxLen
- * 太短的段（< minLen）会跟下一段合并，避免模型因输入过短产生噪声
- */
-function splitTextForTts(text: string, maxLen = 80, minLen = 15): string[] {
-  // 中/日/英句尾标点
-  const segments: string[] = []
-  // 先按句尾拆分
-  const sentences = text.match(/[^。！？.!?…\n]+[。！？.!?…]?/g) || [text]
-
-  let current = ''
-  for (const s of sentences) {
-    if ((current + s).length > maxLen && current.length > 0) {
-      segments.push(current.trim())
-      current = s
-    } else {
-      current += s
-    }
-  }
-  if (current.trim()) segments.push(current.trim())
-
-  // 合并太短的段（避免单独发送「うん。」这类短文本导致噪声）
-  const merged: string[] = []
-  for (const seg of segments) {
-    if (merged.length > 0 && merged[merged.length - 1].length < minLen) {
-      merged[merged.length - 1] += seg
-    } else if (seg.length < minLen && merged.length > 0) {
-      merged[merged.length - 1] += seg
-    } else {
-      merged.push(seg)
-    }
-  }
-  // 如果合并后还有太短的段，跟最后一段合并
-  if (merged.length >= 2 && merged[merged.length - 1].length < minLen) {
-    merged[merged.length - 2] += merged.pop()!
-  }
-
-  return merged.length > 0 ? merged : [text]
-}
-
-/** 尝试将 AI 回复转为语音（长文本自动分段）
- *  @param onFirstAudio - 第一段语音生成完毕时的回调（用于同步显示文字）
- */
-async function speakReply(text: string, onFirstAudio?: () => void): Promise<void> {
+/** 生成单段 TTS 音频，返回 dataUrl（不播放） */
+async function generateSingleTts(text: string): Promise<{ success: boolean; dataUrl: string }> {
   try {
-    console.log('[pet-chat] speakReply 开始, 原文长度:', text.length, '内容:', text.slice(0, 60))
-
     const audioPath = localStorage.getItem('pet_ref_audio_path') || DEFAULT_REF_AUDIO
     const promptText = localStorage.getItem('pet_ref_prompt_text') || ''
-
-    console.log('[pet-chat] 参考音频:', audioPath, '提示文字:', promptText || '(空)')
-
-    // 读取用户保存的语音参数
     let voiceParams: Record<string, number> = {}
-    try {
-      const raw = localStorage.getItem('pet_voice_params')
-      if (raw) voiceParams = JSON.parse(raw)
-    } catch { /* 静默 */ }
+    try { const raw = localStorage.getItem('pet_voice_params'); if (raw) voiceParams = JSON.parse(raw) } catch { /* 静默 */ }
 
     const st = await window.api.voiceStatus()
-    if (!st.running) {
-      console.log('[pet-chat] TTS 服务未运行，跳过语音')
-      return
-    }
+    if (!st.running) return { success: false, dataUrl: '' }
 
-    const ttsText = stripInnerThoughts(text)
-    if (!ttsText) {
-      console.log('[pet-chat] 去掉括号后无文字，跳过 TTS')
-      return
-    }
+    const cleanText = stripInnerThoughts(text)
+    if (!cleanText) return { success: false, dataUrl: '' }
 
-    // 拆分成短段并逐段生成语音
-    const segments = splitTextForTts(ttsText)
-    console.log(`[pet-chat] TTS 文本已拆分为 ${segments.length} 段`)
-
-    for (let i = 0; i < segments.length; i++) {
-      const seg = segments[i]
-      console.log(`[pet-chat] TTS 第 ${i + 1}/${segments.length} 段: "${seg.slice(0, 40)}..."`)
-
-      const res = await window.api.voiceTts({
-        text: seg,
-        text_lang: 'ja',    // 文字已被翻译成日语
-        ref_audio_path: audioPath,
-        prompt_text: promptText,
-        prompt_lang: 'ja',  // 参考音频的文字是日语
-        top_k: voiceParams.top_k ?? 15,
-        top_p: voiceParams.top_p ?? 0.85,
-        temperature: voiceParams.temperature ?? 0.7,
-        speed_factor: voiceParams.speed_factor ?? 1.0,
-        repetition_penalty: voiceParams.repetition_penalty ?? 1.25,
-        sample_steps: voiceParams.sample_steps ?? 16
-      })
-
-      if (res.success && res.dataUrl) {
-        console.log(`[pet-chat] 第 ${i + 1} 段 TTS 成功, 音频大小:`, res.dataUrl.length)
-        // 第一段语音就绪 → 通知外部显示文字 + 开始播放
-        if (i === 0) onFirstAudio?.()
-        const audio = new Audio(res.dataUrl)
-        // 等待当前段播放完再播下一段
-        await new Promise<void>((resolve) => {
-          audio.onended = () => {
-            console.log(`[pet-chat] 第 ${i + 1} 段播放完毕`)
-            resolve()
-          }
-          audio.onerror = (e) => {
-            console.error(`[pet-chat] 第 ${i + 1} 段播放出错:`, e)
-            resolve()
-          }
-          const playPromise = audio.play()
-          if (playPromise) {
-            playPromise.catch((err) => {
-              console.error(`[pet-chat] 第 ${i + 1} 段 play() 被拦截:`, err.message)
-              // 尝试用 AudioContext 方式播放
-              playAudioWithContext(res.dataUrl).then(resolve).catch(() => resolve())
-            })
-          }
-        })
-      } else {
-        console.error(`[pet-chat] 第 ${i + 1} 段 TTS 失败:`, res.message)
-      }
-    }
-    console.log('[pet-chat] TTS 全部段播放完成')
+    const res = await window.api.voiceTts({
+      text: cleanText,
+      text_lang: 'ja',
+      ref_audio_path: audioPath,
+      prompt_text: promptText,
+      prompt_lang: 'ja',
+      top_k: voiceParams.top_k ?? 15,
+      top_p: voiceParams.top_p ?? 0.85,
+      temperature: voiceParams.temperature ?? 0.7,
+      speed_factor: voiceParams.speed_factor ?? 1.0,
+      repetition_penalty: voiceParams.repetition_penalty ?? 1.25,
+      sample_steps: voiceParams.sample_steps ?? 16
+    })
+    return { success: res.success, dataUrl: res.dataUrl }
   } catch (err) {
-    console.error('[pet-chat] TTS 异常:', err)
+    console.error('[pet-chat] 单段 TTS 异常:', err)
+    return { success: false, dataUrl: '' }
   }
 }
 
-/** 备用播放方式：使用 AudioContext 解码并播放（绕过 autoplay 限制） */
-function playAudioWithContext(dataUrl: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    try {
-      const AC: typeof AudioContext = window.AudioContext
-        // @ts-expect-error webkitAudioContext for Safari/old Electron
-        || window.webkitAudioContext
-      const ctx = new AC()
-      fetch(dataUrl)
-        .then(r => r.arrayBuffer())
-        .then(buf => ctx.decodeAudioData(buf))
-        .then(audioBuffer => {
-          const source = ctx.createBufferSource()
-          source.buffer = audioBuffer
-          source.connect(ctx.destination)
-          source.onended = () => { ctx.close().then(resolve).catch(resolve) }
-          source.start(0)
-        })
-        .catch((err) => {
-          console.error('[pet-chat] AudioContext 播放失败:', err)
-          ctx.close().catch(() => {})
-          reject(err)
-        })
-    } catch (err) {
-      reject(err)
+/** 后台逐段预合成语音，同步播放时机 */
+async function preGenerateSegmentAudio(): Promise<void> {
+  segmentAudioUrls = new Array(segments.length).fill(null)
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i] as { emotion: string; text: string; tts_text?: string }
+    if (!seg.tts_text) continue
+    console.log(`[pet] 合成第 ${i + 1}/${segments.length} 段语音...`)
+    const res = await generateSingleTts(seg.tts_text)
+    if (res.success && res.dataUrl) {
+      segmentAudioUrls[i] = res.dataUrl
+      // 当前段语音就绪 → 显示文字并播放（隐藏加载波动）
+      if (i === segIndex) {
+        revealCurrentSegment()
+      }
     }
-  })
+  }
+  console.log('[pet] 全部段语音合成完毕')
+  // 全部完成后如果还有加载波动未消（最后一段合成失败等情况），手动关闭
+  setVoiceLoading(false)
+}
+
+/** 播放当前段（segIndex）的语音（由 revealCurrentSegment 在语音就绪后调用） */
+function playCurrentSegmentAudio(): void {
+  if (currentAudio) {
+    currentAudio.pause()
+    currentAudio = null
+  }
+  const url = segmentAudioUrls[segIndex]
+  if (!url) return
+  try {
+    let vol = 1.0
+    try { const raw = localStorage.getItem('pet_voice_params'); if (raw) vol = JSON.parse(raw).volume ?? 1.0 } catch { /* 静默 */ }
+    const audio = new Audio(url)
+    audio.volume = vol
+    audio.play().catch(() => {})
+    currentAudio = audio
+    audio.onended = () => { if (currentAudio === audio) currentAudio = null }
+  } catch (err) {
+    console.error('[pet] 播放语音失败:', err)
+  }
 }
 
 // ════════════════════════════════════
@@ -355,6 +351,7 @@ function showModel(dataUrl: string): void {
 
     petImage.src = dataUrl
     petImage.classList.remove('hidden')
+    screenshotBtn.classList.remove('hidden')
     dropHint.style.display = 'none'
 
     // 显示对话区域
@@ -392,6 +389,60 @@ window.api.onPetSetEmotion((dataUrl: string) => {
   console.log('[pet] 切换表情')
   // 直接换图，不重新初始化碰撞检测和窗口大小
   petImage.src = dataUrl
+})
+
+// ── 截屏反应：单独显示 + 语音朗读 ──
+window.api.onScreenshotReaction((data: { emotion: string; text: string; ttsText?: string }) => {
+  console.log('[pet] 截屏反应:', data.emotion, data.text)
+  // 保存当前对话分段，等截屏结束后恢复
+  if (!screenShotMode) saveSegments()
+  screenShotMode = true
+
+  // 先入历史（内容与语音无关）
+  chatHistory.push({ role: 'assistant', content: `👀 ${data.text}` } as ChatMsg)
+  if (chatHistory.length > 20) chatHistory = chatHistory.slice(-20)
+  updateHistoryList()
+
+  if (data.ttsText) {
+    // 先显示加载波动，语音就绪后再显示文字
+    latestMsg.innerHTML = ''
+    continueArrow.classList.remove('visible')
+    window.api.setPetEmotion(data.emotion)
+    setVoiceLoading(true)
+    generateSingleTts(data.ttsText).then(res => {
+      setVoiceLoading(false)
+      // 语音就绪 → 现在显示文字
+      latestMsg.innerHTML = `<span class="label-ai">夜乃樱</span> ${data.text}`
+      if (res.success && res.dataUrl) {
+        let vol = 1.0
+        try { const raw = localStorage.getItem('pet_voice_params'); if (raw) vol = JSON.parse(raw).volume ?? 1.0 } catch { /* 静默 */ }
+        const audio = new Audio(res.dataUrl)
+        audio.volume = vol
+        audio.play().catch(() => {})
+      }
+    })
+  } else {
+    // 无 TTS → 直接显示文字
+    latestMsg.innerHTML = `<span class="label-ai">夜乃樱</span> ${data.text}`
+    continueArrow.classList.remove('visible')
+    window.api.setPetEmotion(data.emotion)
+  }
+})
+
+// ── 截屏按钮点击 ──
+screenshotBtn.addEventListener('click', async () => {
+  screenshotBtn.classList.add('capturing')
+  try {
+    const res = await window.api.screenshotCaptureOnce()
+    console.log('[pet] 截屏:', res.message)
+    if (!res.success) {
+      latestMsg.innerHTML = `<span class="label-ai">夜乃樱</span> [${res.message}]`
+    }
+  } catch (err) {
+    console.error('[pet] 截屏异常:', err)
+  } finally {
+    screenshotBtn.classList.remove('capturing')
+  }
 })
 
 // ════════════════════════════════════

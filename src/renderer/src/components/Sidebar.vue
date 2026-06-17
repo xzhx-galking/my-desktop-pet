@@ -7,9 +7,7 @@ const isCollapsed = ref(false)
 
 const navItems = [
   { path: '/', icon: '🏠', label: '首页' },
-  { path: '/model', icon: '🎨', label: '更换立绘' },
-  { path: '/voice', icon: '🎤', label: '语音模块' },
-  { path: '/expression', icon: '😊', label: '表情拆分' }
+  { path: '/settings', icon: '⚙️', label: '设置' }
 ]
 
 const activeRoute = computed(() => route.path)
